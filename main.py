@@ -3,20 +3,6 @@ import asyncio
 import openai
 import aiohttp
 import os
-from flask import Flask
-from threading import Thread
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "I'm alive", 200
-
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-
-Thread(target=run_flask).start()
 import json
 import re
 from typing import Dict, Any, Optional, List
@@ -42,6 +28,21 @@ if not TELEGRAM_TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN не задан в .env")
 
 openai.api_key = OPENAI_API_KEY
+import os
+from flask import Flask
+from threading import Thread
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "I'm alive", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
+Thread(target=run_flask).start()
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
