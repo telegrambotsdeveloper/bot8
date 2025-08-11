@@ -42,10 +42,8 @@ def home():
 
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
-    # Flask в режиме production — здесь простой запуск для примера
-    app.run(host="0.0.0.0", port=port)
-
-Thread(target=run_flask, daemon=True).start()
+    # отключаем reloader, чтобы не было двойного запуска процесса
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
@@ -864,4 +862,7 @@ async def main():
         await bot.session.close()
 
 if __name__ == "__main__":
+    # стартуем Flask только после того, как все маршруты (включая /cryptobot) объявлены
+    Thread(target=run_flask, daemon=True).start()
+    # затем запускаем Aiogram polling
     asyncio.run(main())
