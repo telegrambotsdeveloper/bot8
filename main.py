@@ -350,8 +350,12 @@ def ask_openai_sync(prompt: str, model: str) -> str:
         logging.error(f"OpenAI Error: {e}")
         return "⚠️ Не удалось получить прогноз."
 
+
 async def ask_openai(prompt: str, model: str) -> str:
-    return await asyncio.to_thread(ask_openai_sync, prompt, model)
+    # Все модели работают через одну реальную модель gpt-3.5-turbo
+    real_model = "gpt-3.5-turbo"
+    return await asyncio.to_thread(ask_openai_sync, prompt, real_model)
+(ask_openai_sync, prompt, model)
 
 # ==================== 📅 Получение матчей (ODDS API) ====================
 async def fetch_matches_today():
@@ -554,6 +558,7 @@ async def profile_cb(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode="HTML")
 
 # Реферальная информация
+
 @dp.callback_query(F.data == "referral")
 async def referral_cb(callback: CallbackQuery):
     await callback.answer()
@@ -561,16 +566,41 @@ async def referral_cb(callback: CallbackQuery):
     uid = str(user_id)
     _ensure_user_record(uid)
     referrals = user_tokens[uid].get("referrals", [])
-    lines = []
-    for r in referrals:
-        tokens_r = user_tokens.get(r, {}).get("tokens", 0)
-        stars_r = user_tokens.get(r, {}).get("stars", 0)
-        made = user_tokens.get(r, {}).get("has_made_purchase", False)
-        lines.append(f"• @{r} — Покупал: {'Да' if made else 'Нет'} — {tokens_r}🔸 / {stars_r}⭐")
-    if not lines:
-        await callback.message.answer("У вас пока нет приглашённых.")
+    
+    ref_link = f"https://t.me/MyAIChatBot1_bot?start=ref_{user_id}"
+    text = (
+        "🤝 <b>Реферальная программа</b>
+
+"
+        "Приглашайте друзей по вашей личной ссылке и получайте бонусы!
+
+"
+        f"🔗 Ваша ссылка: <code>{ref_link}</code>
+
+"
+        "💰 Условия:
+"
+        "— Когда приглашённый совершает первую покупку, вы получаете бонусные ⭐.
+"
+        "— Чем больше друзей — тем больше бонусов!
+"
+    )
+    if referrals:
+        text += "
+👥 <b>Ваши приглашённые:</b>
+"
+        for r in referrals:
+            tokens_r = user_tokens.get(r, {}).get("tokens", 0)
+            stars_r = user_tokens.get(r, {}).get("stars", 0)
+            made = user_tokens.get(r, {}).get("has_made_purchase", False)
+            text += f"• ID {r} — Покупал: {'Да' if made else 'Нет'} — {tokens_r}🔸 / {stars_r}⭐
+"
     else:
-        await callback.message.answer("👥 Ваши приглашённые:\n" + "\n".join(lines))
+        text += "
+У вас пока нет приглашённых."
+    
+    await callback.message.answer(text, parse_mode="HTML")
+
 
 @dp.message(Command(commands=["stats"]))
 async def stats(message: Message):
@@ -847,6 +877,23 @@ async def make_forecast(callback: CallbackQuery):
         f"10⭐ = 1 токен. Пополнить баланс: нажмите «Пополнить баланс» в меню.",
         parse_mode="Markdown"
     )
+
+
+@dp.callback_query(F.data == "how_it_works")
+async def how_it_works(callback: CallbackQuery):
+    await callback.answer()
+    example_forecast = (
+        "📊 <b>Как это работает:</b>\n\n"
+        "1. Вы выбираете матч.\n"
+        "2. Бот анализирует данные и прогнозирует исход.\n"
+        "3. Получаете результат: победитель, примерный счёт, аргумент.\n\n"
+        "Пример:\n"
+        "Матч: Манчестер Сити — Ливерпуль\n"
+        "Прогноз: Победа Манчестер Сити, счёт 2:1.\n"
+        "Аргумент: Сити в отличной форме и играет дома."
+    )
+    await callback.message.answer(example_forecast, parse_mode="HTML")
+
 
 # ==================== ▶️ Запуск бота ====================
 async def main():
