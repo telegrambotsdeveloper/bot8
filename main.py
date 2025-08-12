@@ -278,6 +278,7 @@ def get_main_menu(user_id: int = None) -> InlineKeyboardMarkup:
              InlineKeyboardButton(text="👤 Профиль", callback_data="profile")],
             [InlineKeyboardButton(text="📊 Фидбек", callback_data="feedback_report"),
              InlineKeyboardButton(text=f"🧾 Реферальная ссылка", callback_data="referral")],
+            [InlineKeyboardButton(text=\"ℹ Как это работает\", callback_data=\"how_it_works\")],
             [InlineKeyboardButton(text=f"🧠 Модель: {model_name}", callback_data="choose_model")],
             [InlineKeyboardButton(text=f"💰 Пополнить баланс ({stars}⭐ / {tokens}🔸)", callback_data="buy_stars")],
         ])
@@ -303,23 +304,13 @@ def get_feedback_buttons(match: str) -> InlineKeyboardMarkup:
 def get_model_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🚀 GPT-5", callback_data="model:gpt-5"),
-            InlineKeyboardButton(text="⚡ GPT-5-mini", callback_data="model:gpt-5-mini"),
+            InlineKeyboardButton(text="⚡ GPT-4o", callback_data="model:gpt-4o"),
+            InlineKeyboardButton(text="✨ GPT-4o-mini", callback_data="model:gpt-4o-mini"),
         ],
         [
-            InlineKeyboardButton(text="🐜 GPT-5-nano", callback_data="model:gpt-5-nano"),
-            InlineKeyboardButton(text="🔮 GPT-4.1", callback_data="model:gpt-4.1"),
-        ],
-        [
-            InlineKeyboardButton(text="✨ GPT-4.1-mini", callback_data="model:gpt-4.1-mini"),
-            InlineKeyboardButton(text="🌟 GPT-4.1-nano", callback_data="model:gpt-4.1-nano"),
-        ],
-        [
-            InlineKeyboardButton(text="⚡ GPT-4o (дороже)", callback_data="model:gpt-4o"),
             InlineKeyboardButton(text="💡 GPT-3.5", callback_data="model:gpt-3.5-turbo")
         ]
-    ]
-    )
+    ])
 # ==================== 🌍 Перевод команд (пример) ====================
 team_translation = {
     "Manchester City": "Манчестер Сити",
@@ -350,12 +341,8 @@ def ask_openai_sync(prompt: str, model: str) -> str:
         logging.error(f"OpenAI Error: {e}")
         return "⚠️ Не удалось получить прогноз."
 
-
 async def ask_openai(prompt: str, model: str) -> str:
-    # Все модели работают через одну реальную модель gpt-3.5-turbo
-    real_model = "gpt-3.5-turbo"
-    return await asyncio.to_thread(ask_openai_sync, prompt, real_model)
-(ask_openai_sync, prompt, model)
+    return await asyncio.to_thread(ask_openai_sync, prompt, model)
 
 # ==================== 📅 Получение матчей (ODDS API) ====================
 async def fetch_matches_today():
@@ -558,49 +545,32 @@ async def profile_cb(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode="HTML")
 
 # Реферальная информация
-
 @dp.callback_query(F.data == "referral")
 async def referral_cb(callback: CallbackQuery):
     await callback.answer()
     user_id = callback.from_user.id
-    uid = str(user_id)
-    _ensure_user_record(uid)
-    referrals = user_tokens[uid].get("referrals", [])
-    
     ref_link = f"https://t.me/MyAIChatBot1_bot?start=ref_{user_id}"
     text = (
         "🤝 <b>Реферальная программа</b>
 
 "
-        "Приглашайте друзей по вашей личной ссылке и получайте бонусы!
+        "Приглашайте друзей и получайте бонусы!
 
 "
-        f"🔗 Ваша ссылка: <code>{ref_link}</code>
+        "— За каждую первую покупку приглашённого вы получаете количество ⭐, равное количеству токенов, которые он купил.
+"
+        "— Используйте бонусы для прогнозов.
 
 "
-        "💰 Условия:
+        f"Ваша ссылка для приглашений:
+<code>{ref_link}</code>
+
 "
-        "— Когда приглашённый совершает первую покупку, вы получаете бонусные ⭐.
-"
-        "— Чем больше друзей — тем больше бонусов!
-"
+        "Отправьте её друзьям или разместите в соцсетях."
     )
-    if referrals:
-        text += "
-👥 <b>Ваши приглашённые:</b>
-"
-        for r in referrals:
-            tokens_r = user_tokens.get(r, {}).get("tokens", 0)
-            stars_r = user_tokens.get(r, {}).get("stars", 0)
-            made = user_tokens.get(r, {}).get("has_made_purchase", False)
-            text += f"• ID {r} — Покупал: {'Да' if made else 'Нет'} — {tokens_r}🔸 / {stars_r}⭐
-"
-    else:
-        text += "
-У вас пока нет приглашённых."
-    
     await callback.message.answer(text, parse_mode="HTML")
-
+    else:
+        await callback.message.answer("👥 Ваши приглашённые:\n" + "\n".join(lines))
 
 @dp.message(Command(commands=["stats"]))
 async def stats(message: Message):
@@ -882,17 +852,16 @@ async def make_forecast(callback: CallbackQuery):
 @dp.callback_query(F.data == "how_it_works")
 async def how_it_works(callback: CallbackQuery):
     await callback.answer()
-    example_forecast = (
-        "📊 <b>Как это работает:</b>\n\n"
-        "1. Вы выбираете матч.\n"
-        "2. Бот анализирует данные и прогнозирует исход.\n"
-        "3. Получаете результат: победитель, примерный счёт, аргумент.\n\n"
-        "Пример:\n"
-        "Матч: Манчестер Сити — Ливерпуль\n"
-        "Прогноз: Победа Манчестер Сити, счёт 2:1.\n"
-        "Аргумент: Сити в отличной форме и играет дома."
+    example_text = (
+        "ℹ <b>Как это работает</b>\n\n"
+        "1️⃣ Вы выбираете матч или вводите его сами.\n"
+        "2️⃣ Бот анализирует статистику, форму команд и коэффициенты.\n"
+        "3️⃣ Вы получаете прогноз.\n\n"
+        "📌 Пример:\n"
+        "<i>Матч:</i> Ливерпуль — Челси\n"
+        "<i>Прогноз:</i> Победа Ливерпуля 2:1. Ключевой фактор — сильная форма нападения и слабая защита соперника."
     )
-    await callback.message.answer(example_forecast, parse_mode="HTML")
+    await callback.message.answer(example_text, parse_mode="HTML")
 
 
 # ==================== ▶️ Запуск бота ====================
@@ -903,5 +872,7 @@ async def main():
     finally:
         await bot.session.close()
 
+if __name__ == "__main__":
+    asyncio.run(main())
 if __name__ == "__main__":
     asyncio.run(main())
