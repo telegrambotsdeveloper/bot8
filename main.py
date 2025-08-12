@@ -574,8 +574,37 @@ async def referral_cb(callback: CallbackQuery):
             text += f"• Пользователь {r} — Покупал: {'Да' if made else 'Нет'} — {tokens_r}🔸 / {stars_r}⭐\n"
 
     await callback.message.answer(text, parse_mode="HTML")
+
+@dp.callback_query(F.data == "referral")
+async def referral_cb(callback: CallbackQuery):
+    await callback.answer()
+    user_id = callback.from_user.id
+    uid = str(user_id)
+    _ensure_user_record(uid)
+    referrals = user_tokens[uid].get("referrals", [])
+
+    text = (
+        "🤝 <b>Реферальная программа</b>\n\n"
+        "Приглашайте друзей и получайте звёзды за их первой покупку.\n"
+        f"Ваша ссылка для приглашений: <code>/start ref_{user_id}</code>\n"
+        "Отправьте её друзьям или разместите в соцсетях.\n\n"
+        "📌 Как это работает:\n"
+        "— Человек заходит в бота по вашей ссылке.\n"
+        "— Делает первую покупку.\n"
+        "— Вы получаете бонус в звёздах (автоконвертация в токены)."
+    )
+
+    if not referrals:
+        text += "\n\n👥 У вас пока нет приглашённых."
     else:
-        await callback.message.answer("👥 Ваши приглашённые:\n" + "\n".join(lines))
+        text += "\n\n👥 Ваши приглашённые:\n"
+        for r in referrals:
+            tokens_r = user_tokens.get(r, {}).get("tokens", 0)
+            stars_r = user_tokens.get(r, {}).get("stars", 0)
+            made = user_tokens.get(r, {}).get("has_made_purchase", False)
+            text += f"• Пользователь {r} — Покупал: {'Да' if made else 'Нет'} — {tokens_r}🔸 / {stars_r}⭐\n"
+
+    await callback.message.answer(text, parse_mode="HTML")
 
 @dp.message(Command(commands=["stats"]))
 async def stats(message: Message):
