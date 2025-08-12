@@ -278,7 +278,7 @@ def get_main_menu(user_id: int = None) -> InlineKeyboardMarkup:
              InlineKeyboardButton(text="👤 Профиль", callback_data="profile")],
             [InlineKeyboardButton(text="📊 Фидбек", callback_data="feedback_report"),
              InlineKeyboardButton(text=f"🧾 Реферальная ссылка", callback_data="referral")],
-            [InlineKeyboardButton(text=\"ℹ Как это работает\", callback_data=\"how_it_works\")],
+            [InlineKeyboardButton(text="ℹ Как это работает", callback_data="how_it_works")],
             [InlineKeyboardButton(text=f"🧠 Модель: {model_name}", callback_data="choose_model")],
             [InlineKeyboardButton(text=f"💰 Пополнить баланс ({stars}⭐ / {tokens}🔸)", callback_data="buy_stars")],
         ])
@@ -872,7 +872,5 @@ async def main():
     finally:
         await bot.session.close()
 
-if __name__ == "__main__":
-    asyncio.run(main())
 if __name__ == "__main__":
     asyncio.run(main())
