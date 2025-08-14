@@ -914,10 +914,7 @@ async def admin_command(message: Message):
     if str(message.from_user.id) != str(ADMIN_ID):
         await message.answer("⛔ Доступ запрещён.")
         return
-    for uid in user_tokens:
-        user_tokens[uid]["tokens"] = 30
-    save_tokens(user_tokens)
-    await message.answer("✅ Всем пользователям установлено 30 токенов.")
+     await message.answer("✅ Всем пользователям установлено 30 токенов.")
     if len(args) < 2 or args[1] != ADMIN_PASSWORD:
         await message.answer("❌ Неверный пароль.")
         return
