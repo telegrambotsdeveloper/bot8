@@ -931,12 +931,12 @@ async def admin_users(callback: CallbackQuery):
         await callback.answer("⛔", show_alert=True)
         return
     try:
-        text_lines = []
-        for uid, data in user_tokens.items():
-            text_lines.append(f"{uid} — {data.get('tokens',0)}🔸 {data.get('stars',0)}⭐")
-      if not text_lines:
-    text_lines = ["Нет зарегистрированных пользователей."]
-await callback.message.answer("👥 Все пользователи:\n" + "\n".join(text_lines))
+        text_lines = [f"{uid} — {data.get('tokens',0)}🔸 {data.get('stars',0)}⭐" for uid, data in user_tokens.items()]
+        if not text_lines:
+            text_lines = ["Нет зарегистрированных пользователей."]
+        await callback.message.answer("👥 Все пользователи:\n" + "\n".join(text_lines))
+    except Exception as e:
+        await callback.message.answer(f"Ошибка при получении списка: {e}")
 
 @dp.callback_query(F.data == "admin_users_by_date")
 async def admin_users_by_date(callback: CallbackQuery):
