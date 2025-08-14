@@ -259,14 +259,14 @@ def user_has_made_purchase(user_id: int) -> bool:
 # ==================== 🗂 Память и настройки ====================
 user_history = defaultdict(list)  # key — int user_id
 feedback_stats = defaultdict(lambda: {"agree": 0, "disagree": 0})
-user_model = defaultdict(lambda: "gpt-3.5-turbo")  # default model per user (keys are int user_id)
+user_model = defaultdict(lambda: "gpt-4o")  # default model per user (keys are int user_id)
 
 # Для матче-взаимодействия держим временный список матчей на пользователя
 user_last_matches: Dict[int, List[str]] = {}
 
 # ==================== 🔘 Кнопки и клавиатуры ====================
 def get_main_menu(user_id: int = None) -> InlineKeyboardMarkup:
-    model_name = user_model[user_id] if (user_id is not None and user_id in user_model) else "gpt-3.5-turbo"
+    model_name = user_model[user_id] if (user_id is not None and user_id in user_model) else "gpt-4o"
     tokens = get_tokens(user_id) if user_id else 0
     stars = get_stars(user_id) if user_id else 0
     kb = InlineKeyboardMarkup(
@@ -476,12 +476,15 @@ async def start(message: Message):
     if uid not in user_tokens:
         _ensure_user_record(uid)
         # выдаём 1 токен бесплатно
+        import time
+        user_tokens[uid]['reg_date'] = int(time.time())
+        save_tokens(user_tokens)
         add_tokens(user_id, 1)
         await message.answer("👋 Привет! Вам начислен 1 бесплатный токен!")
 
         sub_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")],
-            [InlineKeyboardButton(text="Проверить подписку и получить бонус", callback_data="check_subscription")]
+            [InlineKeyboardButton(text="🔁 Проверить подписку и получить бонус", callback_data="check_subscription")]
         ])
         await message.answer(
             "Хотите ещё один токен? 🤩\n"
