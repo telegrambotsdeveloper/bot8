@@ -20,6 +20,12 @@ from collections import defaultdict
 
 # ==================== 🔧 Загрузка переменных окружения ====================
 load_dotenv()
+
+# === Админские настройки ===
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+if not ADMIN_PASSWORD or not ADMIN_ID:
+    raise RuntimeError("ADMIN_PASSWORD и ADMIN_ID должны быть заданы в .env")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
@@ -476,9 +482,6 @@ async def start(message: Message):
     if uid not in user_tokens:
         _ensure_user_record(uid)
         # выдаём 1 токен бесплатно
-        import time
-        user_tokens[uid]['reg_date'] = int(time.time())
-        save_tokens(user_tokens)
         add_tokens(user_id, 1)
         await message.answer("👋 Привет! Вам начислен 1 бесплатный токен!")
 
@@ -902,6 +905,41 @@ async def how_it_works(callback: CallbackQuery):
     )
     await callback.message.answer(text, parse_mode="HTML")
 
+
+
+# ==================== 🔒 Админ-панель ====================
+@dp.message(Command(commands=["admin"]))
+async def admin_command(message: Message):
+    args = message.text.strip().split(maxsplit=1)
+    if str(message.from_user.id) != str(ADMIN_ID):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+    if len(args) < 2 or args[1] != ADMIN_PASSWORD:
+        await message.answer("❌ Неверный пароль.")
+        return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Список пользователей", callback_data="admin_users")],
+        [InlineKeyboardButton(text="📅 По дате регистрации", callback_data="admin_users_by_date")],
+    ])
+    await message.answer("🔑 Админ-панель открыта:", reply_markup=kb)
+
+@dp.callback_query(F.data == "admin_users")
+async def admin_users(callback: CallbackQuery):
+    if str(callback.from_user.id) != str(ADMIN_ID):
+        await callback.answer("⛔", show_alert=True)
+        return
+    text = "\n".join([f"{uid} — {data.get('tokens',0)}🔸 {data.get('stars',0)}⭐" for uid, data in user_tokens.items()])
+    await callback.message.answer(f"👥 Все пользователи:\n{text}")
+
+@dp.callback_query(F.data == "admin_users_by_date")
+async def admin_users_by_date(callback: CallbackQuery):
+    if str(callback.from_user.id) != str(ADMIN_ID):
+        await callback.answer("⛔", show_alert=True)
+        return
+    sorted_users = sorted(user_tokens.items(), key=lambda x: x[1].get('reg_date', 0))
+    text = "\n".join([f"{uid} — {data.get('tokens',0)}🔸 {data.get('stars',0)}⭐ — {data.get('reg_date','-')}" for uid, data in sorted_users])
+    await callback.message.answer(f"📅 Пользователи по дате регистрации:\n{text}")
 
 # ==================== ▶️ Запуск бота ====================
 async def main():
