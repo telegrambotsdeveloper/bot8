@@ -259,7 +259,7 @@ def user_has_made_purchase(user_id: int) -> bool:
 # ==================== 🗂 Память и настройки ====================
 user_history = defaultdict(list)  # key — int user_id
 feedback_stats = defaultdict(lambda: {"agree": 0, "disagree": 0})
-user_model = defaultdict(lambda: "gpt-4o")  # default model per user (keys are int user_id)
+user_model = defaultdict(lambda: "gpt-3.5-turbo")  # default model per user (keys are int user_id)
 
 # Для матче-взаимодействия держим временный список матчей на пользователя
 user_last_matches: Dict[int, List[str]] = {}
@@ -486,7 +486,7 @@ async def start(message: Message):
         await message.answer(
             "Хотите ещё один токен? 🤩\n"
             f"Подпишитесь на наш канал {CHANNEL_USERNAME} и получите +1 токен в подарок!\n\n"
-            "Нажмите <b>Проверить подписку и получить бонус</b> после подписки, чтобы бот убедился и начислил бонус.",
+            "Нажмите Проверить подписку и получить бонус после подписки, чтобы бот убедился и начислил бонус.",
             reply_markup=sub_kb
         )
     # Повторный запуск: если подписан и бонус ещё не давали — начисляем +1 и помечаем
@@ -898,6 +898,74 @@ async def how_it_works(callback: CallbackQuery):
         "Стоимость прогноза зависит от модели."
     )
     await callback.message.answer(text, parse_mode="HTML")
+
+
+
+# === Админские настройки ===
+ADMIN_ID = 8185719207
+
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+
+def get_last_users(limit=10):
+    return sorted(user_tokens.items(), key=lambda x: x[1].get('reg_date', 0), reverse=True)[:limit]
+
+@dp.message(Command(commands=["a123"]))
+async def admin_menu(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    users = get_last_users()
+    kb = InlineKeyboardMarkup()
+    for uid, data in users:
+        display_name = f"User {uid}"
+        kb.add(InlineKeyboardButton(text=f"{display_name} — {uid}", callback_data=f"admin_user:{uid}"))
+    await message.answer("👑 Админ-панель\nВыбери пользователя:", reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("admin_user:"))
+async def admin_user_menu(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    user_id = callback.data.split(":")[1]
+    tokens = get_tokens(int(user_id))
+    stars = get_stars(int(user_id))
+    kb = InlineKeyboardMarkup()
+    kb.row(
+        InlineKeyboardButton(text="➕ +1 токен", callback_data=f"addtok:{user_id}:1"),
+        InlineKeyboardButton(text="➕ +5 токенов", callback_data=f"addtok:{user_id}:5")
+    )
+    kb.add(InlineKeyboardButton(text="⭐ +1 звезда", callback_data=f"addstar:{user_id}:1"))
+    kb.add(InlineKeyboardButton(text="🔙 Назад", callback_data="admin_back"))
+    await callback.message.edit_text(f"👤 Пользователь {user_id}\n💰 Токены: {tokens}\n⭐ Звёзды: {stars}", reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("addtok:"))
+async def add_tokens_btn(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    _, user_id, amount = callback.data.split(":")
+    add_tokens(int(user_id), int(amount))
+    tokens = get_tokens(int(user_id))
+    stars = get_stars(int(user_id))
+    await callback.message.edit_text(f"👤 Пользователь {user_id}\n💰 Токены: {tokens}\n⭐ Звёзды: {stars}", reply_markup=callback.message.reply_markup)
+
+@dp.callback_query(F.data.startswith("addstar:"))
+async def add_stars_btn(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    _, user_id, amount = callback.data.split(":")
+    add_stars(int(user_id), int(amount))
+    tokens = get_tokens(int(user_id))
+    stars = get_stars(int(user_id))
+    await callback.message.edit_text(f"👤 Пользователь {user_id}\n💰 Токены: {tokens}\n⭐ Звёзды: {stars}", reply_markup=callback.message.reply_markup)
+
+@dp.callback_query(F.data == "admin_back")
+async def admin_back(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    users = get_last_users()
+    kb = InlineKeyboardMarkup()
+    for uid, data in users:
+        display_name = f"User {uid}"
+        kb.add(InlineKeyboardButton(text=f"{display_name} — {uid}", callback_data=f"admin_user:{uid}"))
+    await callback.message.edit_text("👑 Админ-панель\nВыбери пользователя:", reply_markup=kb)
 
 
 # ==================== ▶️ Запуск бота ====================
