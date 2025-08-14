@@ -924,13 +924,23 @@ async def admin_command(message: Message):
     ])
     await message.answer("🔑 Админ-панель открыта:", reply_markup=kb)
 
+
 @dp.callback_query(F.data == "admin_users")
 async def admin_users(callback: CallbackQuery):
     if str(callback.from_user.id) != str(ADMIN_ID):
         await callback.answer("⛔", show_alert=True)
         return
-    text = "\n".join([f"{uid} — {data.get('tokens',0)}🔸 {data.get('stars',0)}⭐" for uid, data in user_tokens.items()])
-    await callback.message.answer(f"👥 Все пользователи:\n{text}")
+    try:
+        text_lines = []
+        for uid, data in user_tokens.items():
+            text_lines.append(f"{uid} — {data.get('tokens',0)}🔸 {data.get('stars',0)}⭐")
+        if not text_lines:
+            text_lines = ["Нет зарегистрированных пользователей."]
+        await callback.message.answer("👥 Все пользователи:
+" + "
+".join(text_lines))
+    except Exception as e:
+        await callback.message.answer(f"Ошибка при получении списка: {e}")
 
 @dp.callback_query(F.data == "admin_users_by_date")
 async def admin_users_by_date(callback: CallbackQuery):
