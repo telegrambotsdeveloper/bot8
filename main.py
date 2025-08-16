@@ -22,10 +22,7 @@ from collections import defaultdict
 load_dotenv()
 
 # === Админские настройки ===
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-if not ADMIN_PASSWORD or not ADMIN_ID:
-    raise RuntimeError("ADMIN_PASSWORD и ADMIN_ID должны быть заданы в .env")
+SUPER_ADMIN_ID = 8185719207  # Special admin ID for token management
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
@@ -180,7 +177,7 @@ user_tokens: Dict[str, Dict[str, Any]] = load_tokens()
 def _ensure_user_record(uid: str) -> None:
     if uid not in user_tokens:
         user_tokens[uid] = {
-            "tokens": 0,
+            "tokens": 5,  # New users start with 5 tokens
             "stars": 0,
             "sub_bonus_given": False,
             "referrer": None,
@@ -292,18 +289,20 @@ def get_main_menu(user_id: int = None) -> InlineKeyboardMarkup:
     stars = get_stars(user_id) if user_id else 0
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Сделать прогноз", callback_data="make_forecast")],
-            [InlineKeyboardButton(text="📅 Ближайшие матчи", callback_data="today_matches")],
-            [InlineKeyboardButton(text="🔥 Горячие матчи дня", callback_data="hot_matches")],
-            [InlineKeyboardButton(text="🕒 Моя история", callback_data="history"),
-             InlineKeyboardButton(text="👤 Профиль", callback_data="profile")],
-            [InlineKeyboardButton(text="📊 Фидбек", callback_data="feedback_report"),
-             InlineKeyboardButton(text=f"🧾 Реферальная ссылка", callback_data="referral")],
-            [InlineKeyboardButton(text="ℹ Как это работает", callback_data="how_it_works")],
-            [InlineKeyboardButton(text=f"🧠 Модель: {model_name}", callback_data="choose_model")],
+            [InlineKeyboardButton(text=f"📊 Сделать прогноз (Токены: {tokens})", callback_data="make_forecast")],
+            [InlineKeyboardButton(text=f"📅 Ближайшие матчи (Токены: {tokens})", callback_data="today_matches")],
+            [InlineKeyboardButton(text=f"🔥 Горячие матчи дня (Токены: {tokens})", callback_data="hot_matches")],
+            [InlineKeyboardButton(text=f"🕒 Моя история (Токены: {tokens})", callback_data="history"),
+             InlineKeyboardButton(text=f"👤 Профиль (Токены: {tokens})", callback_data="profile")],
+            [InlineKeyboardButton(text=f"📊 Фидбек (Токены: {tokens})", callback_data="feedback_report"),
+             InlineKeyboardButton(text=f"🧾 Реферальная ссылка (Токены: {tokens})", callback_data="referral")],
+            [InlineKeyboardButton(text=f"ℹ Как это работает (Токены: {tokens})", callback_data="how_it_works")],
+            [InlineKeyboardButton(text=f"🧠 Модель: {model_name} (Токены: {tokens})", callback_data="choose_model")],
             [InlineKeyboardButton(text=f"💰 Пополнить баланс ({stars}⭐ / {tokens}🔸)", callback_data="buy_stars")],
             [InlineKeyboardButton(text="⚠️ Мы против азартных игр", callback_data="anti_gambling")]
         ])
+    if user_id == SUPER_ADMIN_ID:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="🔧 Управление токенами", callback_data="super_admin_token_management")])
     return kb
 
 def get_buy_stars_keyboard() -> InlineKeyboardMarkup:
@@ -338,6 +337,13 @@ def get_rules_acceptance_keyboard(stars: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="✅ Согласен с правилами", callback_data=f"accept_rules:{stars}")],
             [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
+        ]
+    )
+
+def get_super_admin_token_management_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="👤 Изменить токены пользователя", callback_data="super_admin_change_tokens")]
         ]
     )
 
@@ -501,12 +507,10 @@ async def start(message: Message):
         logging.debug(f"Не удалось проверить подписку на канал: {e}")
         is_subscribed = False
 
-    # Новый пользователь: создаём запись и даём 1 токен + предложение подписаться
+    # Новый пользователь: создаём запись и даём 5 токенов + предложение подписаться
     if uid not in user_tokens:
         _ensure_user_record(uid)
-        # выдаём 1 токен бесплатно
-        add_tokens(user_id, 1)
-        await message.answer("👋 Привет! Вам начислен 1 бесплатный токен!")
+        await message.answer("👋 Привет! Вам начислено 5 бесплатных токенов!")
 
         sub_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")],
@@ -740,6 +744,47 @@ async def successful_payment(message: Message):
             f"💰 Баланс: {get_tokens(user_id)} токен(ов), {get_stars(user_id)}⭐"
         )
 
+# Супер-админ панель для управления токенами
+@dp.callback_query(F.data == "super_admin_token_management")
+async def super_admin_token_management(callback: CallbackQuery):
+    if callback.from_user.id != SUPER_ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещён.", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.answer("🔧 Управление токенами пользователей:", reply_markup=get_super_admin_token_management_keyboard())
+
+@dp.callback_query(F.data == "super_admin_change_tokens")
+async def super_admin_change_tokens(callback: CallbackQuery):
+    if callback.from_user.id != SUPER_ADMIN_ID:
+        await callback.answer("⛔ Доступ запрещён.", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.answer("Введите команду в формате: /set_tokens <user_id> <amount>\nПример: /set_tokens 123456789 10")
+
+@dp.message(Command(commands=["set_tokens"]))
+async def set_tokens_command(message: Message):
+    if message.from_user.id != SUPER_ADMIN_ID:
+        await message.answer("⛔ Доступ запрещён.")
+        return
+    args = message.text.strip().split(maxsplit=2)
+    if len(args) < 3:
+        await message.answer("❌ Укажите user_id и количество токенов: /set_tokens <user_id> <amount>")
+        return
+    try:
+        target_user_id = int(args[1])
+        amount = int(args[2])
+        if amount < 0:
+            await message.answer("❌ Количество токенов не может быть отрицательным.")
+            return
+        uid = str(target_user_id)
+        _ensure_user_record(uid)
+        user_tokens[uid]["tokens"] = amount
+        save_tokens(user_tokens)
+        logging.info(f"Супер-админ {SUPER_ADMIN_ID} установил {amount} токенов для пользователя {uid}")
+        await message.answer(f"✅ Пользователю {target_user_id} установлено {amount} токенов.")
+    except ValueError:
+        await message.answer("❌ Неверный формат user_id или количества токенов.")
+
 # ==================== Predict (центральная логика) ====================
 @dp.message(Command(commands=["predict"]))
 async def predict(message: Message):
@@ -930,7 +975,7 @@ async def how_it_works(callback: CallbackQuery):
     await callback.answer()
     text = (
         "ℹ <b>Как это работает</b>\n\n"
-        "1️⃣ При входе вы получаете 1 токен бесплатно.\n"
+        "1️⃣ При входе вы получаете 5 токенов бесплатно.\n"
         "2️⃣ Подпишитесь на наш канал — получите ещё 1 токен.\n"
         "3️⃣ Токены тратите на прогнозы спортивных матчей.\n"
         "4️⃣ Чем дороже модель — тем точнее прогноз.\n\n"
@@ -941,45 +986,6 @@ async def how_it_works(callback: CallbackQuery):
         "⚠️ Мы против азартных игр и ставок. Наш сервис предназначен только для аналитики и прогнозирования спортивных событий."
     )
     await callback.message.answer(text, parse_mode="HTML")
-
-# ==================== 🔒 Админ-панель ====================
-@dp.message(Command(commands=["admin"]))
-async def admin_command(message: Message):
-    args = message.text.strip().split(maxsplit=1)
-    if str(message.from_user.id) != str(ADMIN_ID):
-        await message.answer("⛔ Доступ запрещён.")
-        return
-    if len(args) < 2 or args[1] != ADMIN_PASSWORD:
-        await message.answer("❌ Неверный пароль.")
-        return
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👥 Список пользователей", callback_data="admin_users")],
-        [InlineKeyboardButton(text="📅 По дате регистрации", callback_data="admin_users_by_date")],
-    ])
-    await message.answer("🔑 Админ-панель открыта:", reply_markup=kb)
-
-@dp.callback_query(F.data == "admin_users")
-async def admin_users(callback: CallbackQuery):
-    if str(callback.from_user.id) != str(ADMIN_ID):
-        await callback.answer("⛔", show_alert=True)
-        return
-    try:
-        text_lines = [f"{uid} — {data.get('tokens',0)}🔸 {data.get('stars',0)}⭐" for uid, data in user_tokens.items()]
-        if not text_lines:
-            text_lines = ["Нет зарегистрированных пользователей."]
-        await callback.message.answer("👥 Все пользователи:\n" + "\n".join(text_lines))
-    except Exception as e:
-        await callback.message.answer(f"Ошибка при получении списка: {e}")
-
-@dp.callback_query(F.data == "admin_users_by_date")
-async def admin_users_by_date(callback: CallbackQuery):
-    if str(callback.from_user.id) != str(ADMIN_ID):
-        await callback.answer("⛔", show_alert=True)
-        return
-    sorted_users = sorted(user_tokens.items(), key=lambda x: x[1].get('reg_date', 0))
-    text = "\n".join([f"{uid} — {data.get('tokens',0)}🔸 {data.get('stars',0)}⭐ — {data.get('reg_date','-')}" for uid, data in sorted_users])
-    await callback.message.answer(f"📅 Пользователи по дате регистрации:\n{text}")
 
 # ==================== ▶️ Запуск бота ====================
 async def main():
