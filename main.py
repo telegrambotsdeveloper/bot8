@@ -18,6 +18,12 @@ from aiogram.filters import Command
 from dotenv import load_dotenv
 from collections import defaultdict
 
+# Рекомендуемые версии библиотек:
+# - aiogram>=3.0.0
+# - openai>=1.0.0
+# - aiohttp>=3.8.0
+# - python-dotenv>=1.0.0
+
 # ==================== 🔧 Загрузка переменных окружения ====================
 load_dotenv()
 
@@ -30,9 +36,12 @@ BOT_USERNAME = "@MyAIChatBot1_bot"  # Username бота
 
 if not TELEGRAM_TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN не задан в .env")
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY не задан в .env")
 
 openai.api_key = OPENAI_API_KEY
-import os
+
+# Flask для Render (оставлено без изменений)
 from flask import Flask
 from threading import Thread
 
@@ -56,15 +65,15 @@ logging.basicConfig(level=logging.INFO)
 CHANNEL_USERNAME = "@Bets_OnlyForBests"
 
 # ==================== Конфигурация экономики ====================
-# сколько звёзд = 1 токен
+# Сколько звёзд = 1 токен
 STARS_PER_TOKEN = 10
 
-# модель -> стоимость в токенах за запрос/прогноз
+# Модель -> стоимость в токенах за запрос/прогноз
 MODEL_COSTS = {
-    "default_model": 1,    # единственная модель
+    "gpt-3.5-turbo": 1,  # Используем реальную модель OpenAI
 }
 
-# бонус реферера: сколько звёзд получает пригласивший за первую покупку приглашённого
+# Бонус реферера: сколько звёзд получает пригласивший за первую покупку приглашённого
 REFERRAL_BONUS_FUNC = lambda tokens_added: int(tokens_added)
 
 # ==================== 📁 Работа с токенами (файл tokens.json) ====================
@@ -102,7 +111,7 @@ def load_tokens() -> Dict[str, Dict[str, Any]]:
             for k, v in data.items():
                 key = str(k)
                 if isinstance(v, dict):
-                    # уже в новом/частично новом формате — нормализуем поля
+                    # Уже в новом/частично новом формате — нормализуем поля
                     tokens = int(v.get("tokens", 0)) if isinstance(v.get("tokens", 0), (int, float, str)) else 0
                     stars = int(v.get("stars", 0)) if isinstance(v.get("stars", 0), (int, float, str)) else 0
                     sub = bool(v.get("sub_bonus_given", False))
@@ -120,7 +129,7 @@ def load_tokens() -> Dict[str, Dict[str, Any]]:
                         "accepted_rules": accepted_rules
                     }
                 else:
-                    # старый формат: просто число токенов
+                    # Старый формат: просто число токенов
                     try:
                         tokens = int(v)
                     except Exception:
@@ -169,14 +178,14 @@ def save_tokens(tokens: Dict[str, Dict[str, Any]]) -> None:
     except Exception as e:
         logging.exception(f"Ошибка при сохранении tokens.json: {e}")
 
-# загружаем
+# Загружаем
 user_tokens: Dict[str, Dict[str, Any]] = load_tokens()
 
-# вспомогательные операции
+# Вспомогательные операции
 def _ensure_user_record(uid: str) -> None:
     if uid not in user_tokens:
         user_tokens[uid] = {
-            "tokens": 5,  # New users start with 5 tokens
+            "tokens": 5,  # Новые пользователи получают 5 токенов
             "stars": 0,
             "sub_bonus_given": False,
             "referrer": None,
@@ -330,7 +339,7 @@ def translate_team(name: str) -> str:
     return team_translation.get(name, name)
 
 # ==================== 🧠 OpenAI — обёртка ====================
-def ask_openai_sync(prompt: str, model: str = "default_model") -> str:
+def ask_openai_sync(prompt: str, model: str = "gpt-3.5-turbo") -> str:
     try:
         response = openai.chat.completions.create(
             model=model,
@@ -343,26 +352,29 @@ def ask_openai_sync(prompt: str, model: str = "default_model") -> str:
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        logging.error(f"OpenAI Error: {e}")
-        return "⚠️ Не удалось получить прогноз."
+        logging.error(f"OpenAI Error details: {type(e).__name__}: {str(e)}")
+        return "⚠️ Не удалось получить прогноз. Проверьте API-ключ или лимиты."
 
-async def ask_openai(prompt: str, model: str = "default_model") -> str:
+async def ask_openai(prompt: str, model: str = "gpt-3.5-turbo") -> str:
     return await asyncio.to_thread(ask_openai_sync, prompt, model)
 
 # ==================== 📅 Получение матчей (ODDS API) ====================
 async def fetch_matches_today():
     if not ODDS_API_KEY:
+        logging.error("ODDS_API_KEY не задан в .env")
         return ["⚠️ ODDS_API_KEY не задан."]
     url = f"https://api.the-odds-api.com/v4/sports/soccer_epl/events?apiKey={ODDS_API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=10) as response:
+                logging.info(f"ODDS API response status: {response.status}")
                 if response.status != 200:
                     logging.warning(f"ODDS API: статус {response.status}")
                     return ["⚠️ Не удалось загрузить матчи."]
                 data = await response.json()
+                logging.info(f"ODDS API response data length: {len(data)}")
                 if not data:
-                    return ["⚠️ Сегодня нет матчей."]
+                    return ["⚠️ Сегодня нет матчей в английской Премьер-лиге."]
                 matches = []
                 for event in data[:10]:
                     home = translate_team(event.get('home_team', 'Home'))
@@ -370,8 +382,14 @@ async def fetch_matches_today():
                     date = event.get('commence_time', '')[:10]
                     matches.append(f"{home} — {away} ({date})")
                 return matches
+    except aiohttp.ClientError as e:
+        logging.exception(f"Сетевая ошибка при получении матчей: {e}")
+        return ["⚠️ Ошибка сети при загрузке матчей."]
+    except asyncio.TimeoutError:
+        logging.exception("Тайм-аут при запросе к ODDS API")
+        return ["⚠️ Тайм-аут при загрузке матчей."]
     except Exception as e:
-        logging.exception(f"Ошибка получения матчей: {e}")
+        logging.exception(f"Неожиданная ошибка при получении матчей: {e}")
         return ["⚠️ Ошибка при загрузке матчей."]
 
 # ==================== 📍 Хендлеры команд ====================
@@ -596,10 +614,10 @@ async def successful_payment(message: Message):
             await message.answer("Оплата прошла, но не удалось распознать пакет. Свяжитесь с поддержкой.")
             return
 
-        # начисляем звезды
+        # Начисляем звёзды
         add_stars(user_id, stars)
 
-        # конвертация: каждые STARS_PER_TOKEN звёзд -> 1 токен
+        # Конвертация: каждые STARS_PER_TOKEN звёзд -> 1 токен
         uid = str(user_id)
         _ensure_user_record(uid)
         current_stars = int(user_tokens[uid].get("stars", 0))
@@ -608,21 +626,21 @@ async def successful_payment(message: Message):
 
         if tokens_to_add > 0:
             add_tokens(user_id, tokens_to_add)
-            # обновляем остаток звёзд
+            # Обновляем остаток звёзд
             user_tokens[uid]["stars"] = remainder_stars
             save_tokens(user_tokens)
 
-        # реферальная логика
+        # Реферальная логика
         ref = user_tokens[uid].get("referrer")
         if ref and not user_tokens[uid].get("has_made_purchase", False):
             inviter = ref
             inviter_bonus = REFERRAL_BONUS_FUNC(tokens_to_add)
             if inviter_bonus > 0:
                 add_stars(int(inviter), inviter_bonus)
-            # пометить, что приглашённый совершил покупку
+            # Пометить, что приглашённый совершил покупку
             mark_made_purchase(user_id)
 
-        # сообщение пользователю
+        # Сообщение пользователю
         await message.answer(
             f"✅ Оплата принята. Вам зачислено {stars}⭐.\n"
             f"↪ Автоконвертация: {tokens_to_add} токенов (осталось {remainder_stars}⭐ на балансе).\n"
@@ -684,20 +702,20 @@ async def predict(message: Message):
         await message.answer("❌ Формат неверный. Используйте: Команда1 - Команда2 или Команда1 vs Команда2")
         return
 
-    # стоимость модели (в токенах)
-    model = "default_model"
+    # Стоимость модели (в токенах)
+    model = "gpt-3.5-turbo"
     cost = MODEL_COSTS.get(model, 1)
 
     if get_tokens(user_id) < cost:
         await message.answer(f"❌ У вас недостаточно токенов. Для прогноза требуется {cost} токен(ов). Купите звёзды и конвертируйте их в токены.", reply_markup=get_buy_stars_keyboard())
         return
 
-    # списываем токены
+    # Списываем токены
     if not remove_tokens(user_id, cost):
         await message.answer("❌ Не удалось списать токены. Попробуйте ещё раз.")
         return
 
-    # сохраняем в историю
+    # Сохраняем в историю
     user_history[user_id].append(match_text)
     if len(user_history[user_id]) > 200:
         user_history[user_id] = user_history[user_id][-200:]
@@ -716,7 +734,7 @@ async def predict(message: Message):
 async def today_matches(callback: CallbackQuery):
     await callback.answer()
     matches = await fetch_matches_today()
-    # сохраняем для пользователя
+    # Сохраняем для пользователя
     user_last_matches[callback.from_user.id] = matches
     text = "📅 *Ближайшие матчи:*\n\n" + "\n".join(f"{i+1}. {m}" for i, m in enumerate(matches))
     # Добавляем кнопку сделать прогноз
@@ -732,7 +750,7 @@ async def choose_match(callback: CallbackQuery):
     if not matches:
         await callback.answer("Сначала загрузите список матчей через 'Ближайшие матчи'.", show_alert=True)
         return
-    # создаём кнопки списка матчей
+    # Создаём кнопки списка матчей
     kb_rows = []
     for idx, m in enumerate(matches[:10]):
         kb_rows.append([InlineKeyboardButton(text=f"{idx+1}. {m.split('(')[0].strip()}", callback_data=f"select_match:{idx}")])
@@ -749,7 +767,7 @@ async def select_match(callback: CallbackQuery):
         await callback.answer("Неправильный матч.", show_alert=True)
         return
     match_text = matches[idx]
-    model = "default_model"
+    model = "gpt-3.5-turbo"
     cost = MODEL_COSTS.get(model, 1)
 
     # Подтверждение
@@ -757,7 +775,7 @@ async def select_match(callback: CallbackQuery):
         [InlineKeyboardButton(text=f"Подтвердить (спишется {cost} токенов)", callback_data=f"confirm_forecast:{idx}")],
         [InlineKeyboardButton(text="Отмена", callback_data="cancel")],
     ])
-    await callback.message.answer(f"Вы выбрали:\n<b>{match_text}</b>\n\nСтоимость: {cost} токен(ов).", parse_mode="HTML", reply_markup=kb)
+    await callback.message.answer(f"Вы выбрали:\n<b>{match_text}</b>\n\nМодель: {model}\nСтоимость: {cost} токен(ов).", parse_mode="HTML", reply_markup=kb)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("confirm_forecast:"))
@@ -769,14 +787,14 @@ async def confirm_forecast(callback: CallbackQuery):
         await callback.answer("Неправильный матч.", show_alert=True)
         return
     match_text = matches[idx]
-    model = "default_model"
+    model = "gpt-3.5-turbo"
     cost = MODEL_COSTS.get(model, 1)
 
     if get_tokens(user_id) < cost:
         await callback.answer("У вас недостаточно токенов для прогноза.", show_alert=True)
         return
 
-    # списываем и генерируем
+    # Списываем и генерируем
     if not remove_tokens(user_id, cost):
         await callback.answer("Не удалось списать токены.", show_alert=True)
         return
@@ -784,7 +802,7 @@ async def confirm_forecast(callback: CallbackQuery):
     await callback.message.answer("🤖 Генерирую прогноз...")
     forecast = await ask_openai(match_text, model)
 
-    # лог истории
+    # Лог истории
     user_history[user_id].append(f"{match_text}")
     if len(user_history[user_id]) > 200:
         user_history[user_id] = user_history[user_id][-200:]
@@ -833,10 +851,18 @@ async def how_it_works(callback: CallbackQuery):
 # ==================== ▶️ Запуск бота ====================
 async def main():
     logging.info("✅ Бот запущен.")
+    logging.info(f"TELEGRAM_TOKEN: {TELEGRAM_TOKEN[:10]}...")
+    logging.info(f"OPENAI_API_KEY: {OPENAI_API_KEY[:5]}...")
     try:
+        bot_info = await bot.get_me()
+        logging.info(f"Bot info: {bot_info}")
         await dp.start_polling(bot)
+    except Exception as e:
+        logging.error(f"Ошибка при запуске бота: {e}")
+        raise
     finally:
         await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
