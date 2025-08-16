@@ -61,7 +61,7 @@ STARS_PER_TOKEN = 10
 
 # модель -> стоимость в токенах за запрос/прогноз
 MODEL_COSTS = {
-    "gpt-3.5-turbo": 1,    # единственная модель
+    "default_model": 1,    # единственная модель
 }
 
 # бонус реферера: сколько звёзд получает пригласивший за первую покупку приглашённого
@@ -330,7 +330,7 @@ def translate_team(name: str) -> str:
     return team_translation.get(name, name)
 
 # ==================== 🧠 OpenAI — обёртка ====================
-def ask_openai_sync(prompt: str, model: str = "gpt-3.5-turbo") -> str:
+def ask_openai_sync(prompt: str, model: str = "default_model") -> str:
     try:
         response = openai.chat.completions.create(
             model=model,
@@ -346,7 +346,7 @@ def ask_openai_sync(prompt: str, model: str = "gpt-3.5-turbo") -> str:
         logging.error(f"OpenAI Error: {e}")
         return "⚠️ Не удалось получить прогноз."
 
-async def ask_openai(prompt: str, model: str = "gpt-3.5-turbo") -> str:
+async def ask_openai(prompt: str, model: str = "default_model") -> str:
     return await asyncio.to_thread(ask_openai_sync, prompt, model)
 
 # ==================== 📅 Получение матчей (ODDS API) ====================
@@ -685,11 +685,11 @@ async def predict(message: Message):
         return
 
     # стоимость модели (в токенах)
-    model = "gpt-3.5-turbo"
+    model = "default_model"
     cost = MODEL_COSTS.get(model, 1)
 
     if get_tokens(user_id) < cost:
-        await message.answer(f"❌ У вас недостаточно токенов. Для модели {model} требуется {cost} токен(ов). Купите звёзды и конвертируйте их в токены.", reply_markup=get_buy_stars_keyboard())
+        await message.answer(f"❌ У вас недостаточно токенов. Для прогноза требуется {cost} токен(ов). Купите звёзды и конвертируйте их в токены.", reply_markup=get_buy_stars_keyboard())
         return
 
     # списываем токены
@@ -706,7 +706,7 @@ async def predict(message: Message):
     forecast = await ask_openai(match_text, model)
 
     await message.answer(
-        f"📊 *Прогноз* (модель {model}, стоимость {cost} токенов):\n{forecast}\n\n"
+        f"📊 *Прогноз* (стоимость {cost} токенов):\n{forecast}\n\n"
         f"💰 Остаток токенов: {get_tokens(user_id)}",
         parse_mode="Markdown"
     )
@@ -749,7 +749,7 @@ async def select_match(callback: CallbackQuery):
         await callback.answer("Неправильный матч.", show_alert=True)
         return
     match_text = matches[idx]
-    model = "gpt-3.5-turbo"
+    model = "default_model"
     cost = MODEL_COSTS.get(model, 1)
 
     # Подтверждение
@@ -757,7 +757,7 @@ async def select_match(callback: CallbackQuery):
         [InlineKeyboardButton(text=f"Подтвердить (спишется {cost} токенов)", callback_data=f"confirm_forecast:{idx}")],
         [InlineKeyboardButton(text="Отмена", callback_data="cancel")],
     ])
-    await callback.message.answer(f"Вы выбрали:\n<b>{match_text}</b>\n\nМодель: {model}\nСтоимость: {cost} токен(ов).", parse_mode="HTML", reply_markup=kb)
+    await callback.message.answer(f"Вы выбрали:\n<b>{match_text}</b>\n\nСтоимость: {cost} токен(ов).", parse_mode="HTML", reply_markup=kb)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("confirm_forecast:"))
@@ -769,11 +769,11 @@ async def confirm_forecast(callback: CallbackQuery):
         await callback.answer("Неправильный матч.", show_alert=True)
         return
     match_text = matches[idx]
-    model = "gpt-3.5-turbo"
+    model = "default_model"
     cost = MODEL_COSTS.get(model, 1)
 
     if get_tokens(user_id) < cost:
-        await callback.answer("У вас недостаточно токенов для этой модели.", show_alert=True)
+        await callback.answer("У вас недостаточно токенов для прогноза.", show_alert=True)
         return
 
     # списываем и генерируем
@@ -785,12 +785,12 @@ async def confirm_forecast(callback: CallbackQuery):
     forecast = await ask_openai(match_text, model)
 
     # лог истории
-    user_history[user_id].append(f"{match_text} — модель {model}")
+    user_history[user_id].append(f"{match_text}")
     if len(user_history[user_id]) > 200:
         user_history[user_id] = user_history[user_id][-200:]
 
     await callback.message.answer(
-        f"📊 *Прогноз* (модель {model}):\n{forecast}\n\n"
+        f"📊 *Прогноз*:\n{forecast}\n\n"
         f"💰 Остаток токенов: {get_tokens(user_id)}",
         parse_mode="Markdown"
     )
@@ -821,7 +821,7 @@ async def how_it_works(callback: CallbackQuery):
         "1️⃣ При входе вы получаете 5 токенов бесплатно.\n"
         "2️⃣ Подпишитесь на наш канал — получите ещё 1 токен.\n"
         "3️⃣ Токены тратите на прогнозы спортивных матчей.\n"
-        "4️⃣ Прогнозы генерируются с помощью модели GPT-3.5.\n\n"
+        "4️⃣ Прогнозы генерируются с помощью искусственного интеллекта.\n\n"
         "💡 Пример:\n"
         "Вы выбираете матч <i>Барселона — Реал</i>.\n"
         "Бот анализирует статистику и даёт прогноз: победитель, возможный счёт, аргументы.\n"
