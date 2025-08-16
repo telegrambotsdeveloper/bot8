@@ -69,8 +69,6 @@ MODEL_COSTS = {
 }
 
 # бонус реферера: сколько звёзд получает пригласивший за первую покупку приглашённого
-# (в твоём примере: пригласивший получил бы 5 звёзд, если приглашённый купил 5 токенов за 50⭐)
-# мы реализуем: inviter_bonus_stars = tokens_added (можно изменить)
 REFERRAL_BONUS_FUNC = lambda tokens_added: int(tokens_added)
 
 # ==================== 📁 Работа с токенами (файл tokens.json) ====================
@@ -85,7 +83,8 @@ def load_tokens() -> Dict[str, Dict[str, Any]]:
          "sub_bonus_given": bool,
          "referrer": Optional[str],
          "referrals": [str],
-         "has_made_purchase": bool
+         "has_made_purchase": bool,
+         "accepted_rules": bool
        } }
     Поддерживает миграцию старого формата.
     """
@@ -114,13 +113,15 @@ def load_tokens() -> Dict[str, Dict[str, Any]]:
                     referrer = v.get("referrer")
                     referrals = v.get("referrals", []) if isinstance(v.get("referrals", []), list) else []
                     has_pur = bool(v.get("has_made_purchase", False))
+                    accepted_rules = bool(v.get("accepted_rules", False))
                     migrated[key] = {
                         "tokens": tokens,
                         "stars": stars,
                         "sub_bonus_given": sub,
                         "referrer": referrer,
                         "referrals": referrals,
-                        "has_made_purchase": has_pur
+                        "has_made_purchase": has_pur,
+                        "accepted_rules": accepted_rules
                     }
                 else:
                     # старый формат: просто число токенов
@@ -134,7 +135,8 @@ def load_tokens() -> Dict[str, Dict[str, Any]]:
                         "sub_bonus_given": False,
                         "referrer": None,
                         "referrals": [],
-                        "has_made_purchase": False
+                        "has_made_purchase": False,
+                        "accepted_rules": False
                     }
             return migrated
     except (json.JSONDecodeError, ValueError) as e:
@@ -162,7 +164,8 @@ def save_tokens(tokens: Dict[str, Dict[str, Any]]) -> None:
                 "sub_bonus_given": bool(v.get("sub_bonus_given", False)),
                 "referrer": v.get("referrer"),
                 "referrals": v.get("referrals", []),
-                "has_made_purchase": bool(v.get("has_made_purchase", False))
+                "has_made_purchase": bool(v.get("has_made_purchase", False)),
+                "accepted_rules": bool(v.get("accepted_rules", False))
             }
         with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(serializable, f, ensure_ascii=False, indent=2)
@@ -182,7 +185,8 @@ def _ensure_user_record(uid: str) -> None:
             "sub_bonus_given": False,
             "referrer": None,
             "referrals": [],
-            "has_made_purchase": False
+            "has_made_purchase": False,
+            "accepted_rules": False
         }
 
 def add_stars(user_id: int, amount: int):
@@ -262,6 +266,17 @@ def user_has_made_purchase(user_id: int) -> bool:
     _ensure_user_record(uid)
     return bool(user_tokens[uid].get("has_made_purchase", False))
 
+def has_accepted_rules(user_id: int) -> bool:
+    uid = str(user_id)
+    _ensure_user_record(uid)
+    return bool(user_tokens[uid].get("accepted_rules", False))
+
+def set_accepted_rules(user_id: int) -> None:
+    uid = str(user_id)
+    _ensure_user_record(uid)
+    user_tokens[uid]["accepted_rules"] = True
+    save_tokens(user_tokens)
+
 # ==================== 🗂 Память и настройки ====================
 user_history = defaultdict(list)  # key — int user_id
 feedback_stats = defaultdict(lambda: {"agree": 0, "disagree": 0})
@@ -287,6 +302,7 @@ def get_main_menu(user_id: int = None) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="ℹ Как это работает", callback_data="how_it_works")],
             [InlineKeyboardButton(text=f"🧠 Модель: {model_name}", callback_data="choose_model")],
             [InlineKeyboardButton(text=f"💰 Пополнить баланс ({stars}⭐ / {tokens}🔸)", callback_data="buy_stars")],
+            [InlineKeyboardButton(text="⚠️ Мы против азартных игр", callback_data="anti_gambling")]
         ])
     return kb
 
@@ -306,7 +322,6 @@ def get_feedback_buttons(match: str) -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="👎", callback_data=f"disagree:{match}")]
     ])
 
-
 def get_model_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -317,6 +332,15 @@ def get_model_choice_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💡 GPT-3.5", callback_data="model:gpt-3.5-turbo")
         ]
     ])
+
+def get_rules_acceptance_keyboard(stars: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Согласен с правилами", callback_data=f"accept_rules:{stars}")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
+        ]
+    )
+
 # ==================== 🌍 Перевод команд (пример) ====================
 team_translation = {
     "Manchester City": "Манчестер Сити",
@@ -374,7 +398,6 @@ async def fetch_matches_today():
     except Exception as e:
         logging.exception(f"Ошибка получения матчей: {e}")
         return ["⚠️ Ошибка при загрузке матчей."]
-
 
 # ==================== Горячие матчи (реальные коэффициенты) ====================
 async def fetch_hot_matches_today():
@@ -505,7 +528,8 @@ async def start(message: Message):
         await message.answer("👋 Привет снова!")
 
     await message.answer(
-        f"💰 Баланс: {get_tokens(user_id)} токен(ов) • {get_stars(user_id)}⭐",
+        f"💰 Баланс: {get_tokens(user_id)} токен(ов) • {get_stars(user_id)}⭐\n\n"
+        f"⚠️ Мы против азартных игр и ставок. Наш сервис предназначен только для аналитики и прогнозирования спортивных событий.",
         reply_markup=get_main_menu(user_id)
     )
 
@@ -539,12 +563,14 @@ async def profile_cb(callback: CallbackQuery):
     data = user_tokens[uid]
     referrals = data.get("referrals", [])
     made = "Да" if data.get("has_made_purchase", False) else "Нет"
+    accepted = "Да" if data.get("accepted_rules", False) else "Нет"
     text = (
         f"👤 <b>Профиль</b>\n\n"
         f"🔸 Токены: {data.get('tokens',0)}\n"
         f"⭐ Звёзды: {data.get('stars',0)}\n"
         f"🎁 Бонус подписки получен: {'Да' if data.get('sub_bonus_given') else 'Нет'}\n"
         f"💳 Покупки совершены: {made}\n"
+        f"✅ Согласен с правилами: {accepted}\n"
         f"🤝 Реферальная ссылка: <code>/start ref_{user_id}</code>\n"
         f"👥 Приглашённые: {len(referrals)}\n"
     )
@@ -581,57 +607,68 @@ async def referral_cb(callback: CallbackQuery):
 
     await callback.message.answer(text, parse_mode="HTML")
 
-@dp.callback_query(F.data == "referral")
-async def referral_cb(callback: CallbackQuery):
+@dp.callback_query(F.data == "anti_gambling")
+async def anti_gambling(callback: CallbackQuery):
     await callback.answer()
-    user_id = callback.from_user.id
-    uid = str(user_id)
-    _ensure_user_record(uid)
-    referrals = user_tokens[uid].get("referrals", [])
-
     text = (
-        "🤝 <b>Реферальная программа</b>\n\n"
-        "Приглашайте друзей и получайте звёзды за их первой покупку.\n"
-        f"Ваша ссылка для приглашений: <code>/start ref_{user_id}</code>\n"
-        "Отправьте её друзьям или разместите в соцсетях.\n\n"
-        "📌 Как это работает:\n"
-        "— Человек заходит в бота по вашей ссылке.\n"
-        "— Делает первую покупку.\n"
-        "— Вы получаете бонус в звёздах (автоконвертация в токены)."
+        "⚠️ <b>Мы против азартных игр</b>\n\n"
+        "Наш сервис предназначен исключительно для анализа и прогнозирования спортивных событий. "
+        "Мы не поддерживаем и не поощряем ставки или любые формы азартных игр. "
+        "Пожалуйста, используйте наши прогнозы только для информационных целей и развлечений."
     )
-
-    if not referrals:
-        text += "\n\n👥 У вас пока нет приглашённых."
-    else:
-        text += "\n\n👥 Ваши приглашённые:\n"
-        for r in referrals:
-            tokens_r = user_tokens.get(r, {}).get("tokens", 0)
-            stars_r = user_tokens.get(r, {}).get("stars", 0)
-            made = user_tokens.get(r, {}).get("has_made_purchase", False)
-            text += f"• Пользователь {r} — Покупал: {'Да' if made else 'Нет'} — {tokens_r}🔸 / {stars_r}⭐\n"
-
     await callback.message.answer(text, parse_mode="HTML")
-
-@dp.message(Command(commands=["stats"]))
-async def stats(message: Message):
-    await message.answer(f"💰 У вас {get_tokens(message.from_user.id)} токен(ов) и {get_stars(message.from_user.id)}⭐")
 
 # Покупка звёзд — показ клавиатуры
 @dp.callback_query(F.data == "buy_stars")
 async def buy_stars_menu(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.answer("Выберите пакет звёзд (покупается в XTR):", reply_markup=get_buy_stars_keyboard())
+    user_id = callback.from_user.id
+    if not has_accepted_rules(user_id):
+        await callback.message.answer(
+            "⚠️ Для покупки звёзд вы должны согласиться с нашими правилами:\n\n"
+            "Мы против азартных игр. Наш сервис предназначен только для анализа и прогнозирования спортивных событий. "
+            "Используйте прогнозы только для информационных целей.\n\n"
+            "Согласны ли вы с этими правилами?",
+            reply_markup=get_rules_acceptance_keyboard(0)
+        )
+    else:
+        await callback.message.answer("Выберите пакет звёзд (покупается в XTR):", reply_markup=get_buy_stars_keyboard())
+
+# Подтверждение принятия правил
+@dp.callback_query(F.data.startswith("accept_rules:"))
+async def accept_rules(callback: CallbackQuery):
+    await callback.answer()
+    user_id = callback.from_user.id
+    stars = int(callback.data.split(":", 1)[1])
+    set_accepted_rules(user_id)
+    if stars > 0:
+        await create_invoice_for_stars(callback, stars)
+    else:
+        await callback.message.answer("✅ Правила приняты! Теперь вы можете приобрести звёзды.", reply_markup=get_buy_stars_keyboard())
 
 # Создание инвойса для покупки звёзд
 @dp.callback_query(F.data.startswith("buy_stars:"))
 async def create_invoice(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if not has_accepted_rules(user_id):
+        await callback.message.answer(
+            "⚠️ Для покупки звёзд вы должны согласиться с нашими правилами:\n\n"
+            "Мы против азартных игр. Наш сервис предназначен только для анализа и прогнозирования спортивных событий. "
+            "Используйте прогнозы только для информационных целей.\n\n"
+            "Согласны ли вы с этими правилами?",
+            reply_markup=get_rules_acceptance_keyboard(int(callback.data.split(":", 1)[1]))
+        )
+        await callback.answer()
+        return
+
     try:
         stars = int(callback.data.split(":", 1)[1])
     except Exception:
         await callback.answer("Ошибка пакета.", show_alert=True)
         return
+    await create_invoice_for_stars(callback, stars)
 
-    # amount in XTR is passed as integer number of stars (no *100)
+async def create_invoice_for_stars(callback: CallbackQuery, stars: int):
     prices = [LabeledPrice(label=f"{stars}⭐", amount=stars)]
     try:
         await bot.send_invoice(
@@ -888,7 +925,6 @@ async def make_forecast(callback: CallbackQuery):
         parse_mode="Markdown"
     )
 
-
 @dp.callback_query(F.data == "how_it_works")
 async def how_it_works(callback: CallbackQuery):
     await callback.answer()
@@ -901,11 +937,10 @@ async def how_it_works(callback: CallbackQuery):
         "💡 Пример:\n"
         "Вы выбираете матч <i>Барселона — Реал</i>.\n"
         "Бот анализирует статистику и даёт прогноз: победитель, возможный счёт, аргументы.\n"
-        "Стоимость прогноза зависит от модели."
+        "Стоимость прогноза зависит от модели.\n\n"
+        "⚠️ Мы против азартных игр и ставок. Наш сервис предназначен только для аналитики и прогнозирования спортивных событий."
     )
     await callback.message.answer(text, parse_mode="HTML")
-
-
 
 # ==================== 🔒 Админ-панель ====================
 @dp.message(Command(commands=["admin"]))
@@ -923,7 +958,6 @@ async def admin_command(message: Message):
         [InlineKeyboardButton(text="📅 По дате регистрации", callback_data="admin_users_by_date")],
     ])
     await message.answer("🔑 Админ-панель открыта:", reply_markup=kb)
-
 
 @dp.callback_query(F.data == "admin_users")
 async def admin_users(callback: CallbackQuery):
