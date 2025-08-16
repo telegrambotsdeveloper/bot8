@@ -60,9 +60,7 @@ STARS_PER_TOKEN = 10
 
 # модель -> стоимость в токенах за запрос/прогноз
 MODEL_COSTS = {
-    "gpt-4o": 3,           # дорогая модель — списывает 3 токена
-    "gpt-4o-small": 2,     # пример
-    "gpt-3.5-turbo": 1,    # дешёвая модель — 1 токен
+    "gpt-3.5-turbo": 1,    # единственная модель
 }
 
 # бонус реферера: сколько звёзд получает пригласивший за первую покупку приглашённого
@@ -276,29 +274,20 @@ def set_accepted_rules(user_id: int) -> None:
 
 # ==================== 🗂 Память и настройки ====================
 user_history = defaultdict(list)  # key — int user_id
-feedback_stats = defaultdict(lambda: {"agree": 0, "disagree": 0})
-user_model = defaultdict(lambda: "gpt-4o")  # default model per user (keys are int user_id)
-
-# Для матче-взаимодействия держим временный список матчей на пользователя
 user_last_matches: Dict[int, List[str]] = {}
 
 # ==================== 🔘 Кнопки и клавиатуры ====================
 def get_main_menu(user_id: int = None) -> InlineKeyboardMarkup:
-    model_name = user_model[user_id] if (user_id is not None and user_id in user_model) else "gpt-4o"
     tokens = get_tokens(user_id) if user_id else 0
     stars = get_stars(user_id) if user_id else 0
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"📊 Сделать прогноз (Токены: {tokens})", callback_data="make_forecast")],
-            [InlineKeyboardButton(text=f"📅 Ближайшие матчи (Токены: {tokens})", callback_data="today_matches")],
-            [InlineKeyboardButton(text=f"🔥 Горячие матчи дня (Токены: {tokens})", callback_data="hot_matches")],
-            [InlineKeyboardButton(text=f"🕒 Моя история (Токены: {tokens})", callback_data="history"),
-             InlineKeyboardButton(text=f"👤 Профиль (Токены: {tokens})", callback_data="profile")],
-            [InlineKeyboardButton(text=f"📊 Фидбек (Токены: {tokens})", callback_data="feedback_report"),
-             InlineKeyboardButton(text=f"🧾 Реферальная ссылка (Токены: {tokens})", callback_data="referral")],
-            [InlineKeyboardButton(text=f"ℹ Как это работает (Токены: {tokens})", callback_data="how_it_works")],
-            [InlineKeyboardButton(text=f"🧠 Модель: {model_name} (Токены: {tokens})", callback_data="choose_model")],
-            [InlineKeyboardButton(text=f"💰 Пополнить баланс ({stars}⭐ / {tokens}🔸)", callback_data="buy_stars")],
+            [InlineKeyboardButton(text="📊 Сделать прогноз", callback_data="make_forecast")],
+            [InlineKeyboardButton(text="📅 Ближайшие матчи", callback_data="today_matches")],
+            [InlineKeyboardButton(text="👤 Профиль", callback_data="profile")],
+            [InlineKeyboardButton(text="🧾 Реферальная ссылка", callback_data="referral")],
+            [InlineKeyboardButton(text="ℹ Как это работает", callback_data="how_it_works")],
+            [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="buy_stars")],
             [InlineKeyboardButton(text="⚠️ Мы против азартных игр", callback_data="anti_gambling")]
         ])
     if user_id == SUPER_ADMIN_ID:
@@ -306,7 +295,6 @@ def get_main_menu(user_id: int = None) -> InlineKeyboardMarkup:
     return kb
 
 def get_buy_stars_keyboard() -> InlineKeyboardMarkup:
-    # Пользователь покупает звёзды (stars), а не токены.
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="50⭐", callback_data="buy_stars:50")],
@@ -314,23 +302,6 @@ def get_buy_stars_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="300⭐", callback_data="buy_stars:300")],
         ]
     )
-
-def get_feedback_buttons(match: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👍", callback_data=f"agree:{match}"),
-         InlineKeyboardButton(text="👎", callback_data=f"disagree:{match}")]
-    ])
-
-def get_model_choice_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="⚡ GPT-4o", callback_data="model:gpt-4o"),
-            InlineKeyboardButton(text="✨ GPT-4o-mini", callback_data="model:gpt-4o-mini"),
-        ],
-        [
-            InlineKeyboardButton(text="💡 GPT-3.5", callback_data="model:gpt-3.5-turbo")
-        ]
-    ])
 
 def get_rules_acceptance_keyboard(stars: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -361,7 +332,7 @@ def translate_team(name: str) -> str:
     return team_translation.get(name, name)
 
 # ==================== 🧠 OpenAI — обёртка ====================
-def ask_openai_sync(prompt: str, model: str) -> str:
+def ask_openai_sync(prompt: str, model: str = "gpt-3.5-turbo") -> str:
     try:
         response = openai.chat.completions.create(
             model=model,
@@ -377,7 +348,7 @@ def ask_openai_sync(prompt: str, model: str) -> str:
         logging.error(f"OpenAI Error: {e}")
         return "⚠️ Не удалось получить прогноз."
 
-async def ask_openai(prompt: str, model: str) -> str:
+async def ask_openai(prompt: str, model: str = "gpt-3.5-turbo") -> str:
     return await asyncio.to_thread(ask_openai_sync, prompt, model)
 
 # ==================== 📅 Получение матчей (ODDS API) ====================
@@ -405,84 +376,7 @@ async def fetch_matches_today():
         logging.exception(f"Ошибка получения матчей: {e}")
         return ["⚠️ Ошибка при загрузке матчей."]
 
-# ==================== Горячие матчи (реальные коэффициенты) ====================
-async def fetch_hot_matches_today():
-    if not ODDS_API_KEY:
-        return []
-    url = f"https://api.the-odds-api.com/v4/sports/soccer_epl/odds?apiKey={ODDS_API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as response:
-                if response.status != 200:
-                    logging.warning(f"ODDS API: статус {response.status}")
-                    return []
-                data = await response.json()
-                matches = []
-                for event in data:
-                    home = translate_team(event.get('home_team', 'Home'))
-                    away = translate_team(event.get('away_team', 'Away'))
-                    date = event.get('commence_time', '')[:10]
-                    bookmakers = event.get("bookmakers", [])
-                    if not bookmakers:
-                        continue
-                    markets = bookmakers[0].get("markets", [])
-                    if not markets:
-                        continue
-                    outcomes = markets[0].get("outcomes", [])
-                    # find three outcomes (home/draw/away) — ensure prices are numbers
-                    if len(outcomes) < 3:
-                        continue
-                    # normalize by mapping by name if order unpredictable
-                    price_map = {o.get("name"): o.get("price") for o in outcomes}
-                    # try fallback to first three if mapping not standard
-                    try:
-                        odds_home = price_map.get(event.get('home_team')) or outcomes[0].get("price")
-                    except Exception:
-                        odds_home = outcomes[0].get("price")
-                    try:
-                        odds_away = price_map.get(event.get('away_team')) or outcomes[-1].get("price")
-                    except Exception:
-                        odds_away = outcomes[-1].get("price")
-                    try:
-                        odds_draw = price_map.get("Draw") or outcomes[1].get("price")
-                    except Exception:
-                        odds_draw = outcomes[1].get("price")
-                    # ensure floats
-                    try:
-                        od_h = float(odds_home)
-                        od_d = float(odds_draw)
-                        od_a = float(odds_away)
-                    except Exception:
-                        continue
-                    matches.append({
-                        "home": home,
-                        "away": away,
-                        "date": date,
-                        "odds_home": od_h,
-                        "odds_draw": od_d,
-                        "odds_away": od_a,
-                        "max_underdog_odds": max(od_h, od_a)
-                    })
-                matches.sort(key=lambda x: x["max_underdog_odds"], reverse=True)
-                return matches
-    except Exception as e:
-        logging.exception(f"Ошибка получения горячих матчей: {e}")
-        return []
-
 # ==================== 📍 Хендлеры команд ====================
-
-@dp.callback_query(F.data == "hot_matches")
-async def hot_matches(callback: CallbackQuery):
-    await callback.answer()
-    matches = await fetch_hot_matches_today()
-    if not matches:
-        await callback.message.answer("⚠️ Сегодня нет горячих матчей.")
-        return
-    text = "🔥 *Горячие матчи дня:*\n\n"
-    for i, m in enumerate(matches[:5], 1):
-        text += f"{i}. {m['home']} — {m['away']} ({m['date']})\n"
-        text += f"   Коэф: {m['odds_home']} / {m['odds_draw']} / {m['odds_away']}\n"
-    await callback.message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command(commands=["start"]))
 async def start(message: Message):
@@ -490,16 +384,14 @@ async def start(message: Message):
     uid = str(user_id)
 
     # Check for referral in /start parameters
-    # aiogram passes full text in message.text: "/start" or "/start ref_12345"
-    # If ref present, set referrer
     text = (message.text or "").strip()
-    m = re.match(r"^/start(?:\s+ref_(\d+))?$", text)
+    m = re.match(r"^/start(?:\s+(\d+))?$", text)
     if m:
         ref = m.group(1)
         if ref:
             set_referrer(user_id, int(ref))
 
-    # Проверка подписки (пытаемся, но не ломаем работу, если ошибка)
+    # Проверка подписки
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
         is_subscribed = member.status in ("member", "administrator", "creator")
@@ -537,7 +429,7 @@ async def start(message: Message):
         reply_markup=get_main_menu(user_id)
     )
 
-# Кнопка проверки подписки (при необходимости)
+# Кнопка проверки подписки
 @dp.callback_query(F.data == "check_subscription")
 async def check_subscription(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -575,7 +467,7 @@ async def profile_cb(callback: CallbackQuery):
         f"🎁 Бонус подписки получен: {'Да' if data.get('sub_bonus_given') else 'Нет'}\n"
         f"💳 Покупки совершены: {made}\n"
         f"✅ Согласен с правилами: {accepted}\n"
-        f"🤝 Реферальная ссылка: <code>/start ref_{user_id}</code>\n"
+        f"🤝 Реферальная ссылка: <code>/start {user_id}</code>\n"
         f"👥 Приглашённые: {len(referrals)}\n"
     )
     await callback.message.answer(text, parse_mode="HTML")
@@ -591,7 +483,7 @@ async def referral_cb(callback: CallbackQuery):
     text = (
         "🤝 <b>Реферальная программа</b>\n\n"
         "Приглашайте друзей и получайте звёзды за их первую покупку.\n"
-        f"Ваша ссылка для приглашений: <code>/start ref_{user_id}</code>\n"
+        f"Ваша ссылка для приглашений: <code>/start {user_id}</code>\n"
         "Отправьте её друзьям или разместите в соцсетях.\n\n"
         "📌 Как это работает:\n"
         "— Человек заходит в бота по вашей ссылке.\n"
@@ -697,7 +589,7 @@ async def process_pre_checkout_query(pre_checkout_query):
     except Exception as e:
         logging.exception(f"pre_checkout error: {e}")
 
-# Обработка успешной оплаты: начисляем звезды, конвертим в токены, начисляем рефереру бонус если нужно
+# Обработка успешной оплаты
 @dp.message(F.successful_payment)
 async def successful_payment(message: Message):
     payload = message.successful_payment.invoice_payload
@@ -727,14 +619,14 @@ async def successful_payment(message: Message):
             user_tokens[uid]["stars"] = remainder_stars
             save_tokens(user_tokens)
 
-        # реферальная логика: если у пользователя есть реферер и он ещё не делал покупок -> начислить бонус пригласившему
+        # реферальная логика
         ref = user_tokens[uid].get("referrer")
         if ref and not user_tokens[uid].get("has_made_purchase", False):
             inviter = ref
             inviter_bonus = REFERRAL_BONUS_FUNC(tokens_to_add)
             if inviter_bonus > 0:
                 add_stars(int(inviter), inviter_bonus)
-            # пометить, что приглашённый совершил покупку — не давать повторно
+            # пометить, что приглашённый совершил покупку
             mark_made_purchase(user_id)
 
         # сообщение пользователю
@@ -800,7 +692,7 @@ async def predict(message: Message):
         return
 
     # стоимость модели (в токенах)
-    model = user_model[user_id]
+    model = "gpt-3.5-turbo"
     cost = MODEL_COSTS.get(model, 1)
 
     if get_tokens(user_id) < cost:
@@ -823,11 +715,10 @@ async def predict(message: Message):
     await message.answer(
         f"📊 *Прогноз* (модель {model}, стоимость {cost} токенов):\n{forecast}\n\n"
         f"💰 Остаток токенов: {get_tokens(user_id)}",
-        parse_mode="Markdown",
-        reply_markup=get_feedback_buttons(match_text)
+        parse_mode="Markdown"
     )
 
-# ==================== 👍👎 Фидбек и остальные коллбэки ====================
+# ==================== Остальные коллбэки ====================
 @dp.callback_query(F.data == "today_matches")
 async def today_matches(callback: CallbackQuery):
     await callback.answer()
@@ -835,7 +726,7 @@ async def today_matches(callback: CallbackQuery):
     # сохраняем для пользователя
     user_last_matches[callback.from_user.id] = matches
     text = "📅 *Ближайшие матчи:*\n\n" + "\n".join(f"{i+1}. {m}" for i, m in enumerate(matches))
-    # Добавляем кнопку сделать прогноз (переходим к выбору матча)
+    # Добавляем кнопку сделать прогноз
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Сделать прогноз по матчу", callback_data="choose_match")],
     ])
@@ -865,10 +756,10 @@ async def select_match(callback: CallbackQuery):
         await callback.answer("Неправильный матч.", show_alert=True)
         return
     match_text = matches[idx]
-    model = user_model[user_id]
+    model = "gpt-3.5-turbo"
     cost = MODEL_COSTS.get(model, 1)
 
-    # Подтверждение: покажем стоимость и кнопку "Подтвердить"
+    # Подтверждение
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"Подтвердить (спишется {cost} токенов)", callback_data=f"confirm_forecast:{idx}")],
         [InlineKeyboardButton(text="Отмена", callback_data="cancel")],
@@ -885,7 +776,7 @@ async def confirm_forecast(callback: CallbackQuery):
         await callback.answer("Неправильный матч.", show_alert=True)
         return
     match_text = matches[idx]
-    model = user_model[user_id]
+    model = "gpt-3.5-turbo"
     cost = MODEL_COSTS.get(model, 1)
 
     if get_tokens(user_id) < cost:
@@ -908,8 +799,7 @@ async def confirm_forecast(callback: CallbackQuery):
     await callback.message.answer(
         f"📊 *Прогноз* (модель {model}):\n{forecast}\n\n"
         f"💰 Остаток токенов: {get_tokens(user_id)}",
-        parse_mode="Markdown",
-        reply_markup=get_feedback_buttons(match_text)
+        parse_mode="Markdown"
     )
     await callback.answer()
 
@@ -917,46 +807,6 @@ async def confirm_forecast(callback: CallbackQuery):
 async def cancel_cb(callback: CallbackQuery):
     await callback.answer("Отменено.", show_alert=False)
 
-@dp.callback_query(F.data == "history")
-async def history(callback: CallbackQuery):
-    await callback.answer()
-    history_list = user_history.get(callback.from_user.id, [])
-    if not history_list:
-        await callback.message.answer("🕒 У вас пока нет истории.")
-    else:
-        await callback.message.answer("🕒 *Последние прогнозы:*\n" + "\n".join(f"• {m}" for m in history_list[-10:]), parse_mode="Markdown")
-
-@dp.callback_query(F.data == "feedback_report")
-async def feedback_report(callback: CallbackQuery):
-    await callback.answer()
-    if not feedback_stats:
-        await callback.message.answer("📊 Пока нет фидбека.")
-    else:
-        report = "\n".join(f"• {match} — 👍 {data['agree']} | 👎 {data['disagree']}" for match, data in feedback_stats.items())
-        await callback.message.answer("📊 *Фидбек по прогнозам:*\n" + report, parse_mode="Markdown")
-
-@dp.callback_query(F.data == "choose_model")
-async def choose_model(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer("🧠 Выберите модель:", reply_markup=get_model_choice_keyboard())
-
-@dp.callback_query(F.data.startswith("model:"))
-async def set_model(callback: CallbackQuery):
-    await callback.answer()
-    model = callback.data.split(":", 1)[1]
-    user_model[callback.from_user.id] = model
-    await callback.message.answer(f"✅ Модель установлена: *{model}*", parse_mode="Markdown", reply_markup=get_main_menu(callback.from_user.id))
-
-@dp.callback_query(F.data.startswith(("agree:", "disagree:")))
-async def feedback_btn(callback: CallbackQuery):
-    await callback.answer()
-    action, match = callback.data.split(":", 1)
-    if action in ("agree", "disagree"):
-        feedback_stats[match][action] += 1
-    reply = "👍 Спасибо за согласие!" if action == "agree" else "👎 Спасибо за честность!"
-    await callback.message.answer(reply)
-
-# Инструкция: Сделать прогноз (новая кнопка)
 @dp.callback_query(F.data == "make_forecast")
 async def make_forecast(callback: CallbackQuery):
     await callback.answer()
@@ -965,7 +815,7 @@ async def make_forecast(callback: CallbackQuery):
         "— Можно использовать кнопку *Ближайшие матчи* и выбрать конкретный матч.\n"
         "— Или отправить команду:\n"
         "/predict Команда1 - Команда2\n\n"
-        f"⚠️ Стоимость прогноза зависит от выбранной модели. Текущая модель: {user_model[callback.from_user.id]}.\n"
+        f"⚠️ Стоимость прогноза: 1 токен.\n"
         f"10⭐ = 1 токен. Пополнить баланс: нажмите «Пополнить баланс» в меню.",
         parse_mode="Markdown"
     )
@@ -978,11 +828,11 @@ async def how_it_works(callback: CallbackQuery):
         "1️⃣ При входе вы получаете 5 токенов бесплатно.\n"
         "2️⃣ Подпишитесь на наш канал — получите ещё 1 токен.\n"
         "3️⃣ Токены тратите на прогнозы спортивных матчей.\n"
-        "4️⃣ Чем дороже модель — тем точнее прогноз.\n\n"
+        "4️⃣ Прогнозы генерируются с помощью модели GPT-3.5.\n\n"
         "💡 Пример:\n"
         "Вы выбираете матч <i>Барселона — Реал</i>.\n"
         "Бот анализирует статистику и даёт прогноз: победитель, возможный счёт, аргументы.\n"
-        "Стоимость прогноза зависит от модели.\n\n"
+        "Стоимость прогноза: 1 токен.\n\n"
         "⚠️ Мы против азартных игр и ставок. Наш сервис предназначен только для аналитики и прогнозирования спортивных событий."
     )
     await callback.message.answer(text, parse_mode="HTML")
