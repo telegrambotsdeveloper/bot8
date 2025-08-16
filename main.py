@@ -26,6 +26,7 @@ SUPER_ADMIN_ID = 8185719207  # Special admin ID for token management
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
+BOT_USERNAME = "@MyAIChatBot1_bot"  # Username бота
 
 if not TELEGRAM_TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN не задан в .env")
@@ -235,14 +236,11 @@ def set_referrer(user_id: int, referrer_id: Optional[int]) -> None:
     if referrer_id is None:
         return
     ref = str(referrer_id)
-    # не позволяем самому себя как реферера
     if ref == uid:
         return
-    # если уже есть реферер — не перезаписываем
     if user_tokens[uid].get("referrer"):
         return
     user_tokens[uid]["referrer"] = ref
-    # добавляем в список рефералов у пригласившего
     _ensure_user_record(ref)
     referrals = user_tokens[ref].get("referrals", [])
     if uid not in referrals:
@@ -399,35 +397,29 @@ async def start(message: Message):
         logging.debug(f"Не удалось проверить подписку на канал: {e}")
         is_subscribed = False
 
-    # Новый пользователь: создаём запись и даём 5 токенов + предложение подписаться
+    sub_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")],
+        [InlineKeyboardButton(text="🔁 Проверить подписку и получить бонус", callback_data="check_subscription")]
+    ])
+
     if uid not in user_tokens:
         _ensure_user_record(uid)
-        await message.answer("👋 Привет! Вам начислено 5 бесплатных токенов!")
-
-        sub_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}")],
-            [InlineKeyboardButton(text="🔁 Проверить подписку и получить бонус", callback_data="check_subscription")]
-        ])
-        await message.answer(
-            "Хотите ещё один токен? 🤩\n"
-            f"Подпишитесь на наш канал {CHANNEL_USERNAME} и получите +1 токен в подарок!\n\n"
-            "Нажмите <b>Проверить подписку и получить бонус</b> после подписки, чтобы бот убедился и начислил бонус.",
-            reply_markup=sub_kb
-        )
-    # Повторный запуск: если подписан и бонус ещё не давали — начисляем +1 и помечаем
+        text = "👋 Привет! Вам начислено 5 бесплатных токенов!\n\n"
+        text += "Хотите ещё один токен? 🤩\n"
+        text += f"Подпишитесь на наш канал {CHANNEL_USERNAME} и получите +1 токен в подарок!\n\n"
+        text += "Нажмите <b>Проверить подписку и получить бонус</b> после подписки, чтобы бот убедился и начислил бонус.\n\n"
     elif is_subscribed and not has_sub_bonus(user_id):
         add_tokens(user_id, 1)
         set_sub_bonus(user_id)
-        await message.answer("🎁 Спасибо за подписку на канал! Вам начислен 1 бонусный токен!")
-
+        text = "🎁 Спасибо за подписку на канал! Вам начислен 1 бонусный токен!\n\n"
     else:
-        await message.answer("👋 Привет снова!")
+        text = "👋 Привет снова!\n\n"
 
-    await message.answer(
+    text += (
         f"💰 Баланс: {get_tokens(user_id)} токен(ов) • {get_stars(user_id)}⭐\n\n"
-        f"⚠️ Мы против азартных игр и ставок. Наш сервис предназначен только для аналитики и прогнозирования спортивных событий.",
-        reply_markup=get_main_menu(user_id)
+        f"⚠️ Мы против азартных игр и ставок. Наш сервис предназначен только для аналитики и прогнозирования спортивных событий."
     )
+    await message.answer(text, reply_markup=get_main_menu(user_id))
 
 # Кнопка проверки подписки
 @dp.callback_query(F.data == "check_subscription")
@@ -443,7 +435,8 @@ async def check_subscription(callback: CallbackQuery):
     if is_subscribed and not has_sub_bonus(user_id):
         add_tokens(user_id, 1)
         set_sub_bonus(user_id)
-        await callback.answer("🎁 Подписка подтверждена — бонусный токен начислен!", show_alert=True)
+        await callback.message.answer("🎁 Подписка подтверждена — бонусный токен начислен!")
+        await callback.answer()
     elif is_subscribed:
         await callback.answer("Вы уже получили бонус подписки ранее.", show_alert=True)
     else:
@@ -467,7 +460,7 @@ async def profile_cb(callback: CallbackQuery):
         f"🎁 Бонус подписки получен: {'Да' if data.get('sub_bonus_given') else 'Нет'}\n"
         f"💳 Покупки совершены: {made}\n"
         f"✅ Согласен с правилами: {accepted}\n"
-        f"🤝 Реферальная ссылка: <code>/start {user_id}</code>\n"
+        f"🤝 Реферальная ссылка: <code>https://t.me/{BOT_USERNAME}?start={user_id}</code>\n"
         f"👥 Приглашённые: {len(referrals)}\n"
     )
     await callback.message.answer(text, parse_mode="HTML")
@@ -483,7 +476,7 @@ async def referral_cb(callback: CallbackQuery):
     text = (
         "🤝 <b>Реферальная программа</b>\n\n"
         "Приглашайте друзей и получайте звёзды за их первую покупку.\n"
-        f"Ваша ссылка для приглашений: <code>/start {user_id}</code>\n"
+        f"Ваша ссылка для приглашений: <code>https://t.me/{BOT_USERNAME}?start={user_id}</code>\n"
         "Отправьте её друзьям или разместите в соцсетях.\n\n"
         "📌 Как это работает:\n"
         "— Человек заходит в бота по вашей ссылке.\n"
