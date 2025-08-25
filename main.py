@@ -353,7 +353,7 @@ def ask_openai_sync(prompt: str, model: str = "gpt-3.5-turbo") -> str:
         return response.choices[0].message.content.strip()
     except Exception as e:
         logging.error(f"OpenAI Error details: {type(e).__name__}: {str(e)}")
-        return "⚠️ Не удалось получить прогноз. Проверьте API-ключ или лимиты."
+        return "⚠️ Не удалось получить прогноз. Пожалуйста, обратитесь в поддержку (контакт поддержки в описании)."
 
 async def ask_openai(prompt: str, model: str = "gpt-3.5-turbo") -> str:
     return await asyncio.to_thread(ask_openai_sync, prompt, model)
